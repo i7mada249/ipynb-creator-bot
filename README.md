@@ -2,6 +2,8 @@
 
 A Telegram bot that instantly converts text messages into Jupyter notebooks and PDF documents.
 
+Try it now: [Telegram bot](https://t.me/oiu_ipynb_bot)
+
 ## 🌟 Features
 
 - **Easy Text-to-Notebook Conversion**: Transform your text messages into professional Jupyter notebooks
