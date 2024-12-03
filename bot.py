@@ -43,11 +43,13 @@ def is_rtl_text(text):
     return any('\u0600' <= char <= '\u06FF' for char in text)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Log the start command
     logger.info(f"Received start command from user {update.effective_user.id}")
     try:
-        # Track user
+        # Get user information
         user = update.effective_user
         users = load_users()
+        # Store user details in the database
         users[str(user.id)] = {
             'username': user.username,
             'first_name': user.first_name,
@@ -57,6 +59,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_users(users)
         logger.info(f"Saved user data for {user.id}")
 
+        # Send welcome message with usage instructions
         await update.message.reply_text(
             f"Welcome {user.first_name}!\n\n"
             "Send me a text and i'll convert it to a Notebook and a pdf\n\n"
@@ -75,10 +78,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Check if user is admin
     if str(update.effective_user.id) != str(ADMIN_ID):
         await update.message.reply_text("Sorry, only admin can use this command.")
         return
 
+    # Validate broadcast message
     if not context.args:
         await update.message.reply_text("Please provide a message to broadcast.\nUsage: /broadcast your message")
         return
@@ -86,15 +91,18 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     broadcast_message = ' '.join(context.args)
     users = load_users()
     
+    # Check if there are any users
     if not users:
         await update.message.reply_text("No users found in the database.")
         return
         
+    # Initialize progress tracking
     progress_msg = await update.message.reply_text("Broadcasting message...\n[□□□□□□□□□□] 0%")
     total_users = len(users)
     success_count = 0
     fail_count = 0
 
+    # Send message to each user with progress updates
     for i, (user_id, user_data) in enumerate(users.items(), 1):
         try:
             await context.bot.send_message(chat_id=user_id, text=broadcast_message)
@@ -103,6 +111,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to send message to user {user_id}: {str(e)}")
             fail_count += 1
         
+        # Update progress every 5 users or at completion
         if i % 5 == 0 or i == total_users:
             progress = int((i / total_users) * 10)
             progress_bar = "■" * progress + "□" * (10 - progress)
@@ -112,6 +121,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Sent: {success_count} | Failed: {fail_count}"
             )
 
+    # Show final broadcast results
     await progress_msg.edit_text(
         f"✅ Broadcast complete!\n"
         f"Successfully sent to: {success_count} users\n"
@@ -119,6 +129,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Check if user is admin
     if str(update.effective_user.id) != str(ADMIN_ID):
         await update.message.reply_text("Sorry, only admin can use this command.")
         return
@@ -128,6 +139,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No users found in the database.")
         return
 
+    # Format user list with detailed information
     user_list = "📊 Registered Users:\n\n"
     for user_id, user_data in users.items():
         username = user_data.get('username', 'No username')
@@ -144,6 +156,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         user_list += user_info
 
+    # Split long messages to comply with Telegram's message length limit
     if len(user_list) > 4000:
         parts = [user_list[i:i+4000] for i in range(0, len(user_list), 4000)]
         for i, part in enumerate(parts, 1):
@@ -153,14 +166,18 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def parse_cells(user_text: str):
+    # Split text into blocks using $$$ as delimiter
     cell_contents = [block.strip() for block in user_text.split("$$$\n") if block.strip()]
     cells = []
 
     for block in cell_contents:
+        # Create markdown cell if block starts with @@@
         if block.startswith("@@@"):
             cells.append(nbformat.v4.new_markdown_cell(block[len("@@@"):].strip()))
         else:
+            # Create code cell for other blocks
             code = block
+            # Add plt.show() if matplotlib is used but not explicitly called
             if 'plt.' in code and not code.strip().endswith('plt.show()'):
                 code = f"{code}\nplt.show()\nplt.close('all')"
             cells.append(nbformat.v4.new_code_cell(code))
@@ -169,6 +186,7 @@ def parse_cells(user_text: str):
 
 
 def execute_notebook(nb):
+    # Add initial setup cell for matplotlib configuration
     setup_cell = nbformat.v4.new_code_cell(
         """
         import matplotlib.pyplot as plt
@@ -178,20 +196,24 @@ def execute_notebook(nb):
     )
     nb.cells.insert(0, setup_cell)
     
+    # Execute all cells in the notebook
     ep = ExecutePreprocessor(timeout=600, kernel_name="python3")
     
     try:
         ep.preprocess(nb, {"metadata": {"path": "./"}})
         
+        # Clean up matplotlib plots after execution
         for cell in nb.cells:
             if cell.cell_type == 'code' and 'plt' in cell.source:
                 plt.close('all')
                 
     except Exception as e:
         logger.error(f"Error executing notebook: {str(e)}")
+        # Add error message as a new cell if execution fails
         error_cell = nbformat.v4.new_code_cell(f"Error During Execution: {str(e)}")
         nb.cells.append(error_cell)
     
+    # Remove the setup cell after execution
     nb.cells.pop(0)
 
 
@@ -293,31 +315,39 @@ async def text_to_ipynb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     timestamp = update.message.date.strftime("%Y%m%d_%H%M%S")
 
     try:
+        # Show initial progress message
         progress_message = await update.message.reply_text("Processing your notebook 📝\n[□□□□□□□□□□] 0%")
         
+        # Generate unique filenames using user ID and timestamp
         base_filename = f"output_{user_id}_{timestamp}"
         notebook_filename = f"{base_filename}.ipynb"
         executed_filename = f"{base_filename}_executed.ipynb"
         pdf_filename = f"{base_filename}.pdf"
 
+        # Create notebook structure from user input
         await progress_message.edit_text("Creating notebook structure 📚\n[■■□□□□□□□□] 20%")
         cells = parse_cells(user_text)
         nb = nbformat.v4.new_notebook()
         nb.cells = cells
 
+        # Save initial notebook
         with open(notebook_filename, "w", encoding="utf-8") as f:
             nbformat.write(nb, f)
         
+        # Execute notebook cells
         await progress_message.edit_text("Executing code cells ⚙️\n[■■■■□□□□□□] 40%")
         execute_notebook(nb)
         
+        # Save executed notebook
         await progress_message.edit_text("Saving executed notebook 💾\n[■■■■■■□□□□] 60%")
         with open(executed_filename, "w", encoding="utf-8") as f:
             nbformat.write(nb, f)
 
+        # Generate PDF from notebook
         await progress_message.edit_text("Generating PDF 📄\n[■■■■■■■■□□] 80%")
         create_pdf_from_notebook(nb, pdf_filename)
 
+        # Send files to user
         await progress_message.edit_text("Sending files 📤\n[■■■■■■■■■■] 100%")
         
         with open(executed_filename, "rb") as f:
@@ -326,6 +356,7 @@ async def text_to_ipynb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(pdf_filename, "rb") as f:
             await update.message.reply_document(f)
 
+        # Clean up temporary files
         for filename in [notebook_filename, executed_filename, pdf_filename]:
             try:
                 os.remove(filename)
