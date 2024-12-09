@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 USERS_FILE = 'users.json'
-ADMIN_ID = 'add your admin id' # add your admin id here
+ADMIN_ID = os.getenv('ADMIN_ID') # add your admin id here
 
 def load_users() -> Dict:
     try:
@@ -380,7 +380,7 @@ async def send_startup_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def main():
     logger.info("Starting bot...")
-    TOKEN = "add your token here" # add your token here
+    TOKEN = os.getenv('TOKEN') # add your token here
     try:
         application = Application.builder().token(TOKEN).build()
         logger.info("Application built successfully")
